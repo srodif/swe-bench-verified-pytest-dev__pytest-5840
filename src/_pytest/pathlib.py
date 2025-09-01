@@ -343,4 +343,12 @@ def unique_path(path):
 
     This is needed only for ``py.path.local``; ``pathlib.Path`` handles this
     natively with ``resolve()``."""
-    return type(path)(normcase(str(path.realpath())))
+    # For pathlib.Path objects, use resolve() which handles case-insensitive
+    # filesystems correctly without changing the case
+    if hasattr(path, 'resolve'):
+        return path.resolve()
+    
+    # For py.path.local objects, use realpath() to resolve symlinks
+    # but don't use normcase() as it breaks case-sensitive imports
+    # on case-insensitive filesystems like Windows
+    return type(path)(str(path.realpath()))

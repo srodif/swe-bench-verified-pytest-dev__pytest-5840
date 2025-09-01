@@ -639,3 +639,66 @@ def test_required_option_help(testdir):
     result = testdir.runpytest("-h", x)
     assert "argument --xyz is required" not in result.stdout.str()
     assert "general:" in result.stdout.str()
+
+
+def test_unique_path_preserves_case_on_windows():
+    """
+    Test that unique_path preserves case even on case-insensitive filesystems.
+    
+    This tests the fix for issue #5840: ImportError while loading conftest 
+    (windows import folder casing issues) where paths were being converted 
+    to lowercase on Windows causing module import failures.
+    """
+    from unittest.mock import patch
+    from _pytest.pathlib import unique_path
+    import py
+    import tempfile
+    import os
+    
+    # Mock Windows normcase behavior where paths are converted to lowercase
+    def mock_windows_normcase(path):
+        return path.lower()
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a directory structure with mixed case like the original issue
+        test_dir = os.path.join(tmpdir, 'ComponentTest', 'Python', 'PIsys')
+        os.makedirs(test_dir, exist_ok=True)
+        
+        conftest_path = os.path.join(test_dir, 'conftest.py')
+        with open(conftest_path, 'w') as f:
+            f.write('# Test conftest\n')
+        
+        pypath = py.path.local(conftest_path)
+        
+        # Test with mocked Windows normcase - should preserve case
+        with patch('os.path.normcase', mock_windows_normcase):
+            # Force reload module to pick up patched normcase
+            import importlib
+            import _pytest.pathlib
+            importlib.reload(_pytest.pathlib)
+            
+            from _pytest.pathlib import unique_path as reloaded_unique_path
+            result = reloaded_unique_path(pypath)
+            
+            # Case should be preserved despite Windows normcase behavior
+            assert 'ComponentTest/Python/PIsys' in str(result)
+            assert 'componenttest/python/pisys' not in str(result)
+    
+    # Test with pathlib.Path objects too
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_dir = os.path.join(tmpdir, 'ComponentTest', 'Python', 'PIsys')  
+        os.makedirs(test_dir, exist_ok=True)
+        
+        pathlib_path = Path(test_dir) / 'conftest.py'
+        pathlib_path.write_text('# Test conftest\n')
+        
+        with patch('os.path.normcase', mock_windows_normcase):
+            importlib.reload(_pytest.pathlib)
+            from _pytest.pathlib import unique_path as reloaded_unique_path
+            
+            result = reloaded_unique_path(pathlib_path)
+            
+            # Should use resolve() which preserves case
+            assert result == pathlib_path.resolve()
+            assert 'ComponentTest/Python/PIsys' in str(result)
